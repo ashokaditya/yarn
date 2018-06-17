@@ -59,6 +59,8 @@ export type ConfigOptions = {
   registry?: ?string,
 
   updateChecksums?: boolean,
+
+  focus?: boolean,
 };
 
 type PackageMetadata = {
@@ -180,6 +182,9 @@ export default class Config {
   //
   commandName: string;
 
+  focus: boolean;
+  focusedWorkspaceName: string;
+
   /**
    * Execute a promise produced by factory if it doesn't exist in our cache with
    * the associated key.
@@ -229,6 +234,16 @@ export default class Config {
     this.workspaceRootFolder = await this.findWorkspaceRoot(this.cwd);
     this.lockfileFolder = this.workspaceRootFolder || this.cwd;
 
+    // using focus in a workspace root is not allowed
+    if (this.focus && (!this.workspaceRootFolder || this.cwd === this.workspaceRootFolder)) {
+      throw new MessageError(this.reporter.lang('workspacesFocusRootCheck'));
+    }
+
+    if (this.focus) {
+      const focusedWorkspaceManifest = await this.readRootManifest();
+      this.focusedWorkspaceName = focusedWorkspaceManifest.name;
+    }
+
     this.linkedModules = [];
 
     let linkedModules;
@@ -264,9 +279,11 @@ export default class Config {
       });
 
       this.registries[key] = registry;
-      this.registryFolders.push(registry.folder);
+      if (this.registryFolders.indexOf(registry.folder) === -1) {
+        this.registryFolders.push(registry.folder);
+      }
       const rootModuleFolder = path.join(this.cwd, registry.folder);
-      if (this.rootModuleFolders.indexOf(rootModuleFolder) < 0) {
+      if (this.rootModuleFolders.indexOf(rootModuleFolder) === -1) {
         this.rootModuleFolders.push(rootModuleFolder);
       }
     }
@@ -397,19 +414,18 @@ export default class Config {
     if (this.modulesFolder) {
       this.rootModuleFolders.push(this.modulesFolder);
     }
+
+    this.focus = !!opts.focus;
+    this.focusedWorkspaceName = '';
   }
 
   /**
    * Generate an absolute module path.
    */
 
-  generateHardModulePath(pkg: ?PackageReference, ignoreLocation?: ?boolean): string {
+  generateModuleCachePath(pkg: ?PackageReference): string {
     invariant(this.cacheFolder, 'No package root');
     invariant(pkg, 'Undefined package');
-
-    if (pkg.location && !ignoreLocation) {
-      return pkg.location;
-    }
 
     let name = pkg.name;
     let uid = pkg.uid;
